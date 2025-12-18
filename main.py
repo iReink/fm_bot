@@ -1,10 +1,18 @@
 from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 import asyncio
 from config import BOT_TOKEN, ADMINS
+from create_event import router as create_event_router
+from aiogram.fsm.storage.memory import MemoryStorage
 
-# --- Клавиатура админа ---
+from aiogram.filters import CommandStart
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+
+storage = MemoryStorage()
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(storage=storage)
+
+# --- Админское меню ---
 admin_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Новый ивент")],
@@ -13,32 +21,24 @@ admin_menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# --- Хендлер команды /start ---
-async def start_handler(message: Message):
+# --- Хендлер /start ---
+@dp.message(CommandStart())
+async def start_handler(message: Message, state: FSMContext):
     if message.from_user.id in ADMINS:
-        await message.answer(
-            "Привет, админ 👋 Выбери действие:",
-            reply_markup=admin_menu
-        )
+        await message.answer("Привет, админ 👋 Выбери действие:", reply_markup=admin_menu)
     else:
         await message.answer("Привет! Это Фильмовочная 🎬")
 
-# --- Хендлер для всех сообщений админа ---
-async def admin_message_handler(message: Message):
+# --- Повторное показ меню ---
+@dp.message()
+async def admin_message_handler(message: Message, state: FSMContext):
     if message.from_user.id in ADMINS:
-        await message.answer(
-            "Меню админа:",
-            reply_markup=admin_menu
-        )
+        await message.answer("Меню админа:", reply_markup=admin_menu)
 
-# --- Основная функция ---
+# --- Подключаем модуль создания ивента ---
+dp.include_router(create_event_router)
+
 async def main():
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher()
-
-    dp.message.register(start_handler, CommandStart())
-    dp.message.register(admin_message_handler)  # любое сообщение от админа
-
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
