@@ -70,9 +70,13 @@ async def event_description(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     last = get_last_event()
     if last:
-        buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"💰 {last[2]}", callback_data="price_fill")]
-        ])
+        buttons = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=f"💰 {last[2]}", callback_data="price_fill")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_event")]
+            ]
+        )
+
     else:
         buttons = cancel_button
     await message.answer("💰 Введите цену билета:", reply_markup=buttons)
@@ -96,7 +100,8 @@ async def event_price(message: Message, state: FSMContext):
     last = get_last_event()
     if last and last[0]:
         buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"🏠 {last[0]}", callback_data="address_fill")]
+            [InlineKeyboardButton(text=f"🏠 {last[0]}", callback_data="address_fill")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_event")]
         ])
     else:
         buttons = cancel_button
@@ -114,7 +119,8 @@ async def event_address(message: Message, state: FSMContext):
 
     if last and last[1]:
         buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"👥 {last[1]}", callback_data="max_fill")]
+            [InlineKeyboardButton(text=f"👥 {last[1]}", callback_data="max_fill")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_event")]
         ])
     else:
         buttons = cancel_button
@@ -135,7 +141,7 @@ async def event_max(message: Message, state: FSMContext):
             await message.answer("⚠️ Введите целое положительное число:", reply_markup=cancel_button)
             return
     await state.update_data(max_participants=max_participants)
-    await message.answer("📅 Введите дату в формате MM.DD (например, 25.12):", reply_markup=cancel_button)
+    await message.answer("📅 Введите дату в формате DD.MM (например, 25.12):", reply_markup=cancel_button)
     await state.set_state(EventStates.date)
 
 @router.message(EventStates.date)
@@ -158,7 +164,8 @@ async def event_date(message: Message, state: FSMContext):
     last = get_last_event()
     if last and last[3]:
         buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"⏰ {last[3]}", callback_data="time_fill")]
+            [InlineKeyboardButton(text=f"⏰ {last[3]}", callback_data="time_fill")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_event")]
         ])
     else:
         buttons = cancel_button
@@ -198,3 +205,68 @@ async def event_time(message: Message, state: FSMContext):
 async def cancel_event(call, state: FSMContext):
     await state.clear()
     await call.message.answer("❌ Создание ивента отменено.")
+
+# --- Хендлер автозаполнения цены ---
+@router.callback_query(lambda c: c.data == "price_fill")
+async def fill_price(call, state: FSMContext):
+    last = get_last_event()
+    if last:
+        await state.update_data(price=last[2])
+        # Переход к адресу
+        if last and last[0]:
+            buttons = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"🏠 {last[0]}", callback_data="address_fill")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_event")]
+            ])
+        else:
+            buttons = cancel_button
+        await call.message.edit_text("🏠 Введите адрес проведения:", reply_markup=buttons)
+        await state.set_state(EventStates.address)
+
+# --- Хендлер автозаполнения адреса ---
+@router.callback_query(lambda c: c.data == "address_fill")
+async def fill_address(call, state: FSMContext):
+    last = get_last_event()
+    if last:
+        await state.update_data(address=last[0])
+        # Переход к макс. участникам
+        if last and last[1]:
+            buttons = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"👥 {last[1]}", callback_data="max_fill")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_event")]
+            ])
+        else:
+            buttons = cancel_button
+        await call.message.edit_text("👥 Введите максимальное количество участников:", reply_markup=buttons)
+        await state.set_state(EventStates.max_participants)
+
+# --- Хендлер автозаполнения макс. участников ---
+@router.callback_query(lambda c: c.data == "max_fill")
+async def fill_max(call, state: FSMContext):
+    last = get_last_event()
+    if last:
+        await state.update_data(max_participants=int(last[1]))
+        # Переход к дате
+        await call.message.edit_text("📅 Введите дату в формате DD.MM (например, 25.12):", reply_markup=cancel_button)
+        await state.set_state(EventStates.date)
+
+# --- Хендлер автозаполнения времени ---
+@router.callback_query(lambda c: c.data == "time_fill")
+async def fill_time(call, state: FSMContext):
+    last = get_last_event()
+    if last:
+        await state.update_data(time=last[3])
+        # После этого сохраняем событие
+        data = await state.get_data()
+        save_event(data)
+        await call.message.edit_text(
+            f"✅ Ивент создан!\n\n"
+            f"🎬 Название: {data['name']}\n"
+            f"📝 Описание: {data['description']}\n"
+            f"💰 Цена: {data['price']}\n"
+            f"🏠 Адрес: {data['address']}\n"
+            f"👥 Макс. участников: {data['max_participants']}\n"
+            f"📅 Дата: {data['date']}\n"
+            f"⏰ Время: {data['time']}"
+        )
+        await state.clear()
