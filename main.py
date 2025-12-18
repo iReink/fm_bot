@@ -35,18 +35,26 @@ async def start_handler(message: Message):
         await message.answer("Привет! Это Фильмовочная 🎬")
 
 # --- Повторное показ меню и обработка кнопок ---
+from aiogram.fsm.context import FSMContext
+
 @dp.message()
 async def admin_message_handler(message: Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
         return
 
+    current_state = await state.get_state()
+    if current_state is not None:
+        # FSM активен — пропускаем, пусть сработает хендлер create_event.py
+        return
+
+    # FSM не активен — показываем меню
     if message.text == "Новый ивент":
-        # Просто передаём state из хендлера
         await start_new_event(message, state)
     elif message.text == "Посмотреть все будущие ивенты":
         await message.answer("📋 Здесь будет список будущих ивентов.")
     else:
         await message.answer("Меню админа:", reply_markup=admin_menu)
+
 
 
 # --- Подключаем модуль создания ивента ---
