@@ -1,6 +1,7 @@
 import sqlite3
-from aiogram import Router, F
-from aiogram.filters import Text
+from aiogram import Router
+from aiogram.filters import Text  # рабочий вариант в aiogram 3.x
+
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
