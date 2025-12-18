@@ -135,22 +135,23 @@ async def event_max(message: Message, state: FSMContext):
             await message.answer("⚠️ Введите целое положительное число:", reply_markup=cancel_button)
             return
     await state.update_data(max_participants=max_participants)
-    await message.answer("📅 Введите дату в формате MM.DD (например, 12.25):", reply_markup=cancel_button)
+    await message.answer("📅 Введите дату в формате MM.DD (например, 25.12):", reply_markup=cancel_button)
     await state.set_state(EventStates.date)
 
 @router.message(EventStates.date)
 async def event_date(message: Message, state: FSMContext):
     text = message.text.strip()
     try:
-        month, day = map(int, text.split("."))
+        day, month = map(int, text.split("."))
         now = datetime.now()
         year = now.year
         dt = datetime(year, month, day)
         if dt.date() < now.date():
             dt = datetime(year + 1, month, day)
         date_str = dt.strftime("%Y-%m-%d")
+
     except Exception:
-        await message.answer("⚠️ Неверный формат даты. Используйте MM.DD:", reply_markup=cancel_button)
+        await message.answer("⚠️ Неверный формат даты. Используйте DD.MM:", reply_markup=cancel_button)
         return
     await state.update_data(date=date_str)
 
