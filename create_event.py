@@ -1,11 +1,9 @@
 import sqlite3
 from aiogram import Router
-from aiogram.filters import Text  # рабочий вариант в aiogram 3.x
-
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent / "data.db"
@@ -55,39 +53,35 @@ def save_event(data: dict):
     conn.close()
 
 # --- Старт создания ивента ---
-@router.message(Text(text="Новый ивент"))
 async def start_new_event(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🎬 Создаём новый ивент!\nВведите название:", reply_markup=cancel_button)
     await state.set_state(EventStates.name)
 
-# --- Ввод названия ---
+# --- Хендлеры FSM ---
 @router.message(EventStates.name)
 async def event_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("📝 Введите описание ивента:", reply_markup=cancel_button)
     await state.set_state(EventStates.description)
 
-# --- Ввод описания ---
 @router.message(EventStates.description)
 async def event_description(message: Message, state: FSMContext):
     await state.update_data(description=message.text)
     last = get_last_event()
     if last:
-        price_buttons = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"💰 {last[2]}", callback_data=f"price_fill")]
+        buttons = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"💰 {last[2]}", callback_data="price_fill")]
         ])
     else:
-        price_buttons = None
-    await message.answer("💰 Введите цену билета:", reply_markup=price_buttons or cancel_button)
+        buttons = cancel_button
+    await message.answer("💰 Введите цену билета:", reply_markup=buttons)
     await state.set_state(EventStates.price)
 
-# --- Ввод цены ---
 @router.message(EventStates.price)
 async def event_price(message: Message, state: FSMContext):
-    data = await state.get_data()
     last = get_last_event()
-    if message.text == "💰 " + str(last[2]) if last else False:
+    if last and message.text == f"💰 {last[2]}":
         price = last[2]
     else:
         try:
@@ -99,42 +93,38 @@ async def event_price(message: Message, state: FSMContext):
             return
     await state.update_data(price=price)
 
-    # Адрес с автозаполнением
+    last = get_last_event()
     if last and last[0]:
         buttons = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"🏠 {last[0]}", callback_data="address_fill")]
         ])
     else:
-        buttons = None
-
-    await message.answer("🏠 Введите адрес проведения:", reply_markup=buttons or cancel_button)
+        buttons = cancel_button
+    await message.answer("🏠 Введите адрес проведения:", reply_markup=buttons)
     await state.set_state(EventStates.address)
 
-# --- Ввод адреса ---
 @router.message(EventStates.address)
 async def event_address(message: Message, state: FSMContext):
     last = get_last_event()
-    if message.text.startswith("🏠 ") and last:
+    if last and message.text == f"🏠 {last[0]}":
         address = last[0]
     else:
         address = message.text
     await state.update_data(address=address)
 
-    # Максимальное количество участников с автозаполнением
     if last and last[1]:
         buttons = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"👥 {last[1]}", callback_data="max_fill")]
         ])
     else:
-        buttons = None
-    await message.answer("👥 Введите максимальное количество участников:", reply_markup=buttons or cancel_button)
+        buttons = cancel_button
+    await message.answer("👥 Введите максимальное количество участников:", reply_markup=buttons)
     await state.set_state(EventStates.max_participants)
 
-# --- Ввод максимального количества участников ---
 @router.message(EventStates.max_participants)
 async def event_max(message: Message, state: FSMContext):
     last = get_last_event()
-    if message.text.startswith("👥 ") and last:
+    if last and message.text == f"👥 {last[1]}":
         max_participants = int(last[1])
     else:
         try:
@@ -142,16 +132,12 @@ async def event_max(message: Message, state: FSMContext):
             if max_participants <= 0:
                 raise ValueError
         except ValueError:
-            await message.answer("⚠️ Введите целое положительное число для участников:", reply_markup=cancel_button)
+            await message.answer("⚠️ Введите целое положительное число:", reply_markup=cancel_button)
             return
     await state.update_data(max_participants=max_participants)
-    last_time = last[3] if last else None
-
-    # Дата
     await message.answer("📅 Введите дату в формате MM.DD (например, 12.25):", reply_markup=cancel_button)
     await state.set_state(EventStates.date)
 
-# --- Ввод даты ---
 @router.message(EventStates.date)
 async def event_date(message: Message, state: FSMContext):
     text = message.text.strip()
@@ -164,7 +150,7 @@ async def event_date(message: Message, state: FSMContext):
             dt = datetime(year + 1, month, day)
         date_str = dt.strftime("%Y-%m-%d")
     except Exception:
-        await message.answer("⚠️ Неверный формат даты. Используйте MM.DD (например, 12.25):", reply_markup=cancel_button)
+        await message.answer("⚠️ Неверный формат даты. Используйте MM.DD:", reply_markup=cancel_button)
         return
     await state.update_data(date=date_str)
 
@@ -174,32 +160,27 @@ async def event_date(message: Message, state: FSMContext):
             [InlineKeyboardButton(text=f"⏰ {last[3]}", callback_data="time_fill")]
         ])
     else:
-        buttons = None
-
-    await message.answer("⏰ Введите время в формате HH:MM (например, 18:30):", reply_markup=buttons or cancel_button)
+        buttons = cancel_button
+    await message.answer("⏰ Введите время в формате HH:MM (например, 18:30):", reply_markup=buttons)
     await state.set_state(EventStates.time)
 
-# --- Ввод времени ---
 @router.message(EventStates.time)
 async def event_time(message: Message, state: FSMContext):
-    text = message.text.strip()
     last = get_last_event()
-    if text.startswith("⏰ ") and last:
+    if last and message.text == f"⏰ {last[3]}":
         time_str = last[3]
     else:
         try:
-            datetime.strptime(text, "%H:%M")
-            time_str = text
+            datetime.strptime(message.text.strip(), "%H:%M")
+            time_str = message.text.strip()
         except ValueError:
-            await message.answer("⚠️ Неверный формат времени. Используйте HH:MM (например, 18:30):", reply_markup=cancel_button)
+            await message.answer("⚠️ Неверный формат времени. Используйте HH:MM:", reply_markup=cancel_button)
             return
     await state.update_data(time=time_str)
 
-    # Сохраняем данные
     data = await state.get_data()
     save_event(data)
 
-    # Подтверждение
     await message.answer(
         f"✅ Ивент создан!\n\n"
         f"🎬 Название: {data['name']}\n"
@@ -212,8 +193,7 @@ async def event_time(message: Message, state: FSMContext):
     )
     await state.clear()
 
-# --- Отмена ---
-@router.callback_query(Text(text="cancel_event"))
+@router.callback_query(lambda call: call.data == "cancel_event")
 async def cancel_event(call, state: FSMContext):
     await state.clear()
     await call.message.answer("❌ Создание ивента отменено.")
