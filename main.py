@@ -6,6 +6,8 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN, ADMINS
 from create_event import router as create_event_router, start_new_event
+from aiogram.fsm.context import FSMContext
+
 
 # --- Логирование ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -34,16 +36,18 @@ async def start_handler(message: Message):
 
 # --- Повторное показ меню и обработка кнопок ---
 @dp.message()
-async def admin_message_handler(message: Message):
+async def admin_message_handler(message: Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
         return
 
     if message.text == "Новый ивент":
-        await start_new_event(message, dp.storage.get(message.chat.id))
+        # Просто передаём state из хендлера
+        await start_new_event(message, state)
     elif message.text == "Посмотреть все будущие ивенты":
         await message.answer("📋 Здесь будет список будущих ивентов.")
     else:
         await message.answer("Меню админа:", reply_markup=admin_menu)
+
 
 # --- Подключаем модуль создания ивента ---
 dp.include_router(create_event_router)
