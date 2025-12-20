@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN, ADMINS
 from create_event import router as create_event_router, start_new_event
+from view_event_admin import router as view_event_router, show_future_events
 
 # --- Логирование ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -42,10 +43,12 @@ async def admin_menu_handler(message: Message, state: FSMContext):
     if message.text == "Новый ивент":
         await start_new_event(message, state)
     elif message.text == "Посмотреть все будущие ивенты":
-        await message.answer("📋 Здесь будет список будущих ивентов.")
+        await show_future_events(message)
+
 
 # --- Подключаем модуль создания ивента ---
 dp.include_router(create_event_router)
+dp.include_router(view_event_router)
 
 async def main():
     logging.info("Бот запущен")
