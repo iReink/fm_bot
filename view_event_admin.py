@@ -83,13 +83,14 @@ def get_event_participants(event_id: int):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT user_name, user_nick
-        FROM event_participants
+        SELECT user_name, user_nickname
+        FROM registrations
         WHERE event_id = ?
     """, (event_id,))
     rows = cursor.fetchall()
     conn.close()
     return rows
+
 
 
 # --------------------------------------------------
