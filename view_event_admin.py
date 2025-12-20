@@ -162,13 +162,18 @@ async def show_future_events(message: Message):
 @router.callback_query(lambda c: c.data.startswith("event_edit:"))
 async def event_edit(call: CallbackQuery):
     event_id = int(call.data.split(":")[1])
-    await call.message.edit_reply_markup(event_edit_kb(event_id))
+    await call.message.edit_reply_markup(
+        reply_markup=event_edit_kb(event_id)
+    )
 
 
 @router.callback_query(lambda c: c.data.startswith("event_back:"))
 async def event_back(call: CallbackQuery):
     event_id = int(call.data.split(":")[1])
-    await call.message.edit_reply_markup(event_main_kb(event_id))
+    await call.message.edit_reply_markup(
+        reply_markup=event_main_kb(event_id)
+    )
+
 
 
 @router.callback_query(lambda c: c.data.startswith("event_users:"))
