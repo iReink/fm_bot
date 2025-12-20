@@ -15,6 +15,18 @@ from aiogram.fsm.context import FSMContext
 DB_PATH = Path(__file__).resolve().parent / "data.db"
 router = Router()
 
+EDIT_FIELDS = {
+    "name": ("Название", "name"),
+    "description": ("Описание", "description"),
+    "price": ("Цену", "price"),
+    "address": ("Адрес", "address"),
+    "max": ("максимальное количество участников", "max_participants"),
+    "date": ("дату (DD.MM)", "event_date"),
+    "time": ("время (HH:MM)", "event_time"),
+}
+
+
+
 # --------------------------------------------------
 # FSM для редактирования одного поля
 # --------------------------------------------------
@@ -209,3 +221,70 @@ async def event_delete_yes(call: CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("event_delete_no:"))
 async def event_delete_no(call: CallbackQuery):
     await call.message.answer("❎ Удаление отменено.")
+
+
+@router.callback_query(lambda c: c.data.startswith("event_edit_"))
+async def start_edit_field(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    action = parts[0]          # event_edit_price
+    event_id = int(parts[1])   # ID ивента
+
+    field_key = action.replace("event_edit_", "")
+
+    if field_key not in EDIT_FIELDS:
+        await call.answer("Неизвестное поле", show_alert=True)
+        return
+
+    label, db_field = EDIT_FIELDS[field_key]
+
+    await state.set_state(EditEventState.value)
+    await state.update_data(
+        event_id=event_id,
+        field=db_field,
+        field_key=field_key
+    )
+
+    await call.message.answer(f"✏️ Введите новое значение для поля «{label}»:")
+
+
+@router.message(EditEventState.value)
+async def apply_edit(message: Message, state: FSMContext):
+    data = await state.get_data()
+
+    event_id = data["event_id"]
+    field = data["field"]
+    field_key = data["field_key"]
+    value = message.text.strip()
+
+    # --- Валидация (минимальная, но корректная) ---
+    try:
+        if field_key == "price":
+            value = float(value)
+            if value < 0:
+                raise ValueError
+
+        elif field_key == "max":
+            value = int(value)
+            if value <= 0:
+                raise ValueError
+
+        elif field_key == "date":
+            day, month = map(int, value.split("."))
+            now = datetime.now()
+            year = now.year
+            dt = datetime(year, month, day)
+            if dt.date() < now.date():
+                dt = datetime(year + 1, month, day)
+            value = dt.strftime("%Y-%m-%d")
+
+        elif field_key == "time":
+            datetime.strptime(value, "%H:%M")
+
+    except Exception:
+        await message.answer("⚠️ Неверный формат. Попробуй ещё раз.")
+        return
+
+    update_event_field(event_id, field, value)
+
+    await message.answer("✅ Значение обновлено.")
+    await state.clear()
