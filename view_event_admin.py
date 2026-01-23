@@ -104,6 +104,18 @@ def get_event_participants(event_id: int):
     return rows
 
 
+def count_event_registrations(event_id: int) -> int:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) FROM registrations WHERE event_id = ?",
+        (event_id,)
+    )
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
 
 # --------------------------------------------------
 # Клавиатуры
@@ -150,13 +162,17 @@ async def show_future_events(message: Message):
 
     for e in events:
         event_id, name, desc, price, address, max_p, date, time = e
+        registered_count = count_event_registrations(event_id)
+        participants_line = f"👥 Участников {registered_count}/{max_p}"
+        if registered_count >= max_p:
+            participants_line += " — солдаут!"
 
         text = (
             f"🎬 <b>{name}</b>\n"
             f"📝 {desc}\n\n"
             f"💰 Цена: {price}\n"
             f"🏠 Адрес: {address}\n"
-            f"👥 Макс: {max_p}\n"
+            f"{participants_line}\n"
             f"📅 {date} ⏰ {time}"
         )
 
