@@ -11,7 +11,11 @@ from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
 
 from config import ADMINS, BOT_TOKEN
 from create_event import router as create_event_router, start_new_event
-from participant_events import router as participant_router, send_nearest_event
+from participant_events import (
+    router as participant_router,
+    send_nearest_event,
+    reminder_loop,
+)
 from view_event_admin import router as view_event_router, show_future_events
 
 # --- Логирование ---
@@ -39,8 +43,8 @@ def upsert_user(user_id: int, username: str, nickname: str):
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO users (user_id, username, nickname, active)
-        VALUES (?, ?, ?, 1)
+        INSERT INTO users (user_id, username, nickname, active, notification_on)
+        VALUES (?, ?, ?, 1, 1)
         ON CONFLICT(user_id) DO UPDATE SET
             username = excluded.username,
             nickname = excluded.nickname,
@@ -87,6 +91,7 @@ dp.include_router(participant_router)
 
 async def main():
     logging.info("Бот запущен")
+    asyncio.create_task(reminder_loop(bot))
     await dp.start_polling(bot)
 
 
