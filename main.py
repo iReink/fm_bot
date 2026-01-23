@@ -1,12 +1,17 @@
 import asyncio
 import logging
+import sqlite3
+from pathlib import Path
+
 from aiogram import Bot, Dispatcher
-from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from config import BOT_TOKEN, ADMINS
+from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
+
+from config import ADMINS, BOT_TOKEN
 from create_event import router as create_event_router, start_new_event
+from participant_events import router as participant_router, send_nearest_event
 from view_event_admin import router as view_event_router, show_future_events
 
 # --- Логирование ---
@@ -17,6 +22,8 @@ storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
+DB_PATH = Path(__file__).resolve().parent / "data.db"
+
 # --- Админское меню ---
 admin_menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -26,13 +33,39 @@ admin_menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+
+def upsert_user(user_id: int, username: str, nickname: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO users (user_id, username, nickname, active)
+        VALUES (?, ?, ?, 1)
+        ON CONFLICT(user_id) DO UPDATE SET
+            username = excluded.username,
+            nickname = excluded.nickname,
+            active = 1
+        """,
+        (user_id, username, nickname),
+    )
+    conn.commit()
+    conn.close()
+
+
 # --- Хендлер /start ---
 @dp.message(CommandStart())
 async def start_handler(message: Message):
     if message.from_user.id in ADMINS:
         await message.answer("Привет, админ 👋 Выбери действие:", reply_markup=admin_menu)
     else:
+        upsert_user(
+            message.from_user.id,
+            message.from_user.username or "",
+            message.from_user.full_name,
+        )
         await message.answer("Привет! Это Фильмовочная 🎬")
+        await send_nearest_event(message)
+
 
 # --- Хендлер меню админа (ловит только кнопки) ---
 @dp.message(lambda msg: msg.text in ["Новый ивент", "Посмотреть все будущие ивенты"])
@@ -49,10 +82,13 @@ async def admin_menu_handler(message: Message, state: FSMContext):
 # --- Подключаем модуль создания ивента ---
 dp.include_router(create_event_router)
 dp.include_router(view_event_router)
+dp.include_router(participant_router)
+
 
 async def main():
     logging.info("Бот запущен")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
