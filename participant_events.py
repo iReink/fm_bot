@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from aiogram import Router
@@ -120,6 +121,28 @@ def cancel_user_registration(event_id: int, user_id: int):
     conn.close()
 
 
+def add_log_entry(user_id: int, user_name: str, user_nickname: str, description: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    now = datetime.now()
+    cursor.execute(
+        """
+        INSERT INTO logs (user_id, user_name, user_nickname, description, log_date, log_time)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            user_name,
+            user_nickname,
+            description,
+            now.strftime("%Y-%m-%d"),
+            now.strftime("%H:%M:%S"),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
 def format_event_text(event_row, is_full: bool) -> str:
     event_id, name, desc, price, address, _, date_str, time_str = event_row
     warning = "\n⚠️ Мест нет" if is_full else ""
@@ -230,6 +253,12 @@ async def user_register(call: CallbackQuery):
         user_name = call.from_user.full_name
         user_nickname = call.from_user.username or ""
         register_user_for_event(event_id, call.from_user.id, user_name, user_nickname)
+        add_log_entry(
+            call.from_user.id,
+            user_name,
+            user_nickname,
+            f"Регистрация на ивент «{event_row[1]}»",
+        )
 
     text, keyboard = build_event_card(event_row, call.from_user.id)
     await call.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
@@ -244,6 +273,13 @@ async def user_cancel(call: CallbackQuery):
     if not event_row:
         await call.answer("Ивент не найден", show_alert=True)
         return
+
+    add_log_entry(
+        call.from_user.id,
+        call.from_user.full_name,
+        call.from_user.username or "",
+        f"Отмена регистрации на ивент «{event_row[1]}»",
+    )
 
     text, keyboard = build_event_card(event_row, call.from_user.id)
     await call.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
