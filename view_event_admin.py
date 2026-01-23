@@ -7,11 +7,13 @@ from aiogram.types import (
     Message,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    CallbackQuery
+    CallbackQuery,
+    BufferedInputFile,
 )
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 
+from ics_utils import build_event_ics
 DB_PATH = Path(__file__).resolve().parent / "data.db"
 router = Router()
 
@@ -125,6 +127,7 @@ def event_main_kb(event_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"event_edit:{event_id}")],
         [InlineKeyboardButton(text="👥 Просмотреть участников", callback_data=f"event_users:{event_id}")],
+        [InlineKeyboardButton(text="📅 Добавить в календарь (.ics)", callback_data=f"event_ics:{event_id}")],
         [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"event_delete:{event_id}")]
     ])
 
@@ -237,6 +240,20 @@ async def event_delete_yes(call: CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("event_delete_no:"))
 async def event_delete_no(call: CallbackQuery):
     await call.message.answer("❎ Удаление отменено.")
+
+
+@router.callback_query(lambda c: c.data.startswith("event_ics:"))
+async def event_send_ics(call: CallbackQuery):
+    event_id = int(call.data.split(":")[1])
+    event_row = get_event(event_id)
+    if not event_row:
+        await call.answer("Ивент не найден", show_alert=True)
+        return
+
+    filename, content = build_event_ics(event_row)
+    ics_file = BufferedInputFile(content, filename=filename)
+    await call.message.answer_document(ics_file, caption="📅 Файл календаря")
+    await call.answer()
 
 
 @router.callback_query(lambda c: c.data.startswith("event_edit_"))

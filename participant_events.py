@@ -11,8 +11,10 @@ from aiogram.types import (
     CallbackQuery,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    BufferedInputFile,
 )
 
+from ics_utils import build_event_ics
 DB_PATH = Path(__file__).resolve().parent / "data.db"
 router = Router()
 
@@ -180,14 +182,24 @@ def format_event_text(event_row, is_full: bool) -> str:
 
 
 def build_event_keyboard(event_id: int, user_id: int, is_full: bool) -> InlineKeyboardMarkup | None:
+    add_calendar_button = InlineKeyboardButton(
+        text="📅 Добавить в календарь (.ics)",
+        callback_data=f"user_ics:{event_id}",
+    )
     if is_user_registered(event_id, user_id):
         return InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="❌ Отменить регистрацию", callback_data=f"user_cancel:{event_id}")]]
+            inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Отменить регистрацию", callback_data=f"user_cancel:{event_id}")],
+                [add_calendar_button],
+            ]
         )
     if is_full:
-        return None
+        return InlineKeyboardMarkup(inline_keyboard=[[add_calendar_button]])
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="✅ Записаться", callback_data=f"user_register:{event_id}")]]
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Записаться", callback_data=f"user_register:{event_id}")],
+            [add_calendar_button],
+        ]
     )
 
 
@@ -439,3 +451,17 @@ async def reminder_unsubscribe(call: CallbackQuery):
 async def reminder_disable_notifications(call: CallbackQuery):
     set_user_notification_setting(call.from_user.id, False)
     await call.answer("Уведомления выключены")
+
+
+@router.callback_query(lambda c: c.data.startswith("user_ics:"))
+async def user_send_ics(call: CallbackQuery):
+    event_id = int(call.data.split(":")[1])
+    event_row = get_event_by_id(event_id)
+    if not event_row:
+        await call.answer("Ивент не найден", show_alert=True)
+        return
+
+    filename, content = build_event_ics(event_row)
+    ics_file = BufferedInputFile(content, filename=filename)
+    await call.message.answer_document(ics_file, caption="📅 Файл календаря")
+    await call.answer()
