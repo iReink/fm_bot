@@ -29,7 +29,8 @@ def create_tables():
             address TEXT,
             max_participants INTEGER,
             event_date TEXT,
-            event_time TEXT
+            event_time TEXT,
+            is_deleted INTEGER DEFAULT 0
         )
     """)
 
