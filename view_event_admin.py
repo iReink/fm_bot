@@ -9,13 +9,17 @@ from aiogram.types import (
     InlineKeyboardButton,
     CallbackQuery,
     BufferedInputFile,
+    FSInputFile,
 )
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 
 from ics_utils import build_event_ics
 DB_PATH = Path(__file__).resolve().parent / "data.db"
+PICS_DIR = Path(__file__).resolve().parent / "pics"
 router = Router()
+
+DASH_SYMBOLS = {"-", "—", "–", "−", "‑"}
 
 EDIT_FIELDS = {
     "name": ("Название", "name"),
@@ -25,6 +29,7 @@ EDIT_FIELDS = {
     "max": ("максимальное количество участников", "max_participants"),
     "date": ("дату (DD.MM)", "event_date"),
     "time": ("время (HH:MM)", "event_time"),
+    "poster": ("афишу", "poster"),
 }
 
 
@@ -118,6 +123,42 @@ def count_event_registrations(event_id: int) -> int:
     return count
 
 
+def get_poster_path(event_id: int) -> Path:
+    return PICS_DIR / f"{event_id}.png"
+
+
+def is_skip_poster(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return all(symbol in DASH_SYMBOLS for symbol in stripped)
+
+
+async def send_event_info(message: Message, text: str, event_id: int, reply_markup: InlineKeyboardMarkup):
+    poster_path = get_poster_path(event_id)
+    if poster_path.exists():
+        photo = FSInputFile(poster_path)
+        await message.answer_photo(photo, caption=text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def update_event_poster(message: Message, event_id: int) -> bool:
+    poster_path = get_poster_path(event_id)
+    if message.photo:
+        PICS_DIR.mkdir(parents=True, exist_ok=True)
+        photo = message.photo[-1]
+        await message.bot.download(photo, destination=poster_path)
+        await message.answer("✅ Афиша сохранена.")
+        return True
+    if message.text and is_skip_poster(message.text):
+        if poster_path.exists():
+            poster_path.unlink()
+        await message.answer("✅ Афиша удалена.")
+        return True
+    await message.answer("⚠️ Отправьте изображение или «-», чтобы удалить афишу.")
+    return False
+
 
 # --------------------------------------------------
 # Клавиатуры
@@ -141,7 +182,8 @@ def event_edit_kb(event_id: int):
         [InlineKeyboardButton(text="🏠 Адрес", callback_data=f"event_edit_address:{event_id}")],
         [InlineKeyboardButton(text="👥 Макс. участников", callback_data=f"event_edit_max:{event_id}")],
         [InlineKeyboardButton(text="📅 Дата", callback_data=f"event_edit_date:{event_id}")],
-        [InlineKeyboardButton(text="⏰ Время", callback_data=f"event_edit_time:{event_id}")]
+        [InlineKeyboardButton(text="⏰ Время", callback_data=f"event_edit_time:{event_id}")],
+        [InlineKeyboardButton(text="🖼 Афиша", callback_data=f"event_edit_poster:{event_id}")]
     ])
 
 
@@ -178,12 +220,7 @@ async def show_future_events(message: Message):
             f"{participants_line}\n"
             f"📅 {date} ⏰ {time}"
         )
-
-        await message.answer(
-            text,
-            reply_markup=event_main_kb(event_id),
-            parse_mode="HTML"
-        )
+        await send_event_info(message, text, event_id, event_main_kb(event_id))
 
 
 # --------------------------------------------------
@@ -276,8 +313,10 @@ async def start_edit_field(call: CallbackQuery, state: FSMContext):
         field=db_field,
         field_key=field_key
     )
-
-    await call.message.answer(f"✏️ Введите новое значение для поля «{label}»:")
+    if field_key == "poster":
+        await call.message.answer("🖼 Отправьте новую афишу или «-», чтобы удалить текущую.")
+    else:
+        await call.message.answer(f"✏️ Введите новое значение для поля «{label}»:")
 
 
 @router.message(EditEventState.value)
@@ -287,6 +326,11 @@ async def apply_edit(message: Message, state: FSMContext):
     event_id = data["event_id"]
     field = data["field"]
     field_key = data["field_key"]
+    if field_key == "poster":
+        if await update_event_poster(message, event_id):
+            await state.clear()
+        return
+
     value = message.text.strip()
 
     # --- Валидация (минимальная, но корректная) ---

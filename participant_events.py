@@ -12,10 +12,12 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     BufferedInputFile,
+    FSInputFile,
 )
 
 from ics_utils import build_event_ics
 DB_PATH = Path(__file__).resolve().parent / "data.db"
+PICS_DIR = Path(__file__).resolve().parent / "pics"
 router = Router()
 
 REMINDER_WINDOW_MINUTES = 2
@@ -181,6 +183,10 @@ def format_event_text(event_row, is_full: bool) -> str:
     )
 
 
+def get_poster_path(event_id: int) -> Path:
+    return PICS_DIR / f"{event_id}.png"
+
+
 def build_event_keyboard(event_id: int, user_id: int, is_full: bool) -> InlineKeyboardMarkup | None:
     add_calendar_button = InlineKeyboardButton(
         text="📅 Добавить в календарь (.ics)",
@@ -227,7 +233,41 @@ def build_event_card(event_row, user_id: int):
     is_full = max_participants is not None and registered_count >= max_participants
     text = format_event_text(event_row, is_full=is_full)
     keyboard = build_event_keyboard(event_id, user_id, is_full=is_full)
-    return text, keyboard
+    return text, keyboard, is_full
+
+
+async def send_event_message(message: Message, event_id: int, text: str, keyboard: InlineKeyboardMarkup | None):
+    poster_path = get_poster_path(event_id)
+    if poster_path.exists():
+        photo = FSInputFile(poster_path)
+        await message.answer_photo(photo, caption=text, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def update_event_message(message: Message, event_id: int, text: str, keyboard: InlineKeyboardMarkup | None):
+    poster_path = get_poster_path(event_id)
+    if poster_path.exists():
+        if message.photo:
+            await message.edit_caption(text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            photo = FSInputFile(poster_path)
+            await message.answer_photo(photo, caption=text, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        if message.photo:
+            await message.delete()
+            await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            await message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def send_reminder_message(bot: Bot, user_id: int, event_id: int, text: str, keyboard: InlineKeyboardMarkup):
+    poster_path = get_poster_path(event_id)
+    if poster_path.exists():
+        photo = FSInputFile(poster_path)
+        await bot.send_photo(user_id, photo, caption=text, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
 
 
 def build_participant_menu(notification_on: bool) -> ReplyKeyboardMarkup:
@@ -252,8 +292,8 @@ async def send_nearest_event(message: Message):
         return
 
     event_row = events[0]
-    text, keyboard = build_event_card(event_row, message.from_user.id)
-    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    text, keyboard, _ = build_event_card(event_row, message.from_user.id)
+    await send_event_message(message, event_row[0], text, keyboard)
     menu = build_participant_menu(get_user_notification_setting(message.from_user.id))
     await message.answer("Выберите, что хотите посмотреть:", reply_markup=menu)
 
@@ -266,8 +306,8 @@ async def show_all_events(message: Message):
         return
 
     for event_row in events:
-        text, keyboard = build_event_card(event_row, message.from_user.id)
-        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        text, keyboard, _ = build_event_card(event_row, message.from_user.id)
+        await send_event_message(message, event_row[0], text, keyboard)
 
 
 @router.message(lambda msg: msg.text == "Ивенты, в которых я участвую")
@@ -278,8 +318,8 @@ async def show_user_events(message: Message):
         return
 
     for event_row in events:
-        text, keyboard = build_event_card(event_row, message.from_user.id)
-        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        text, keyboard, _ = build_event_card(event_row, message.from_user.id)
+        await send_event_message(message, event_row[0], text, keyboard)
 
 
 @router.message(lambda msg: msg.text in ["Включить напоминания", "Выключить напоминания"])
@@ -305,7 +345,7 @@ async def user_register(call: CallbackQuery):
     if is_full:
         text = format_event_text(event_row, is_full=True)
         keyboard = build_event_keyboard(event_id, call.from_user.id, is_full=True)
-        await call.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await update_event_message(call.message, event_id, text, keyboard)
         await call.answer("Мест нет")
         return
 
@@ -320,8 +360,8 @@ async def user_register(call: CallbackQuery):
             f"Регистрация на ивент «{event_row[1]}»",
         )
 
-    text, keyboard = build_event_card(event_row, call.from_user.id)
-    await call.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    text, keyboard, _ = build_event_card(event_row, call.from_user.id)
+    await update_event_message(call.message, event_id, text, keyboard)
     await call.answer("Записано")
 
 
@@ -341,8 +381,8 @@ async def user_cancel(call: CallbackQuery):
         f"Отмена регистрации на ивент «{event_row[1]}»",
     )
 
-    text, keyboard = build_event_card(event_row, call.from_user.id)
-    await call.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    text, keyboard, _ = build_event_card(event_row, call.from_user.id)
+    await update_event_message(call.message, event_id, text, keyboard)
     await call.answer("Регистрация отменена")
 
 
@@ -409,7 +449,7 @@ async def send_event_reminders(bot: Bot):
 
         text = build_reminder_text(row[:8])
         keyboard = build_reminder_keyboard(event_id)
-        await bot.send_message(user_id, text, reply_markup=keyboard, parse_mode="HTML")
+        await send_reminder_message(bot, user_id, event_id, text, keyboard)
         sent_today.add(reminder_key)
 
 
@@ -442,8 +482,8 @@ async def reminder_unsubscribe(call: CallbackQuery):
         f"Отписка от напоминания на ивент «{event_row[1]}»",
     )
 
-    text, keyboard = build_event_card(event_row, call.from_user.id)
-    await call.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    text, keyboard, _ = build_event_card(event_row, call.from_user.id)
+    await update_event_message(call.message, event_id, text, keyboard)
     await call.answer("Вы отписались")
 
 

@@ -7,7 +7,10 @@ from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent / "data.db"
+PICS_DIR = Path(__file__).resolve().parent / "pics"
 router = Router()
+
+DASH_SYMBOLS = {"-", "—", "–", "−", "‑"}
 
 # --- FSM состояния ---
 class EventStates(StatesGroup):
@@ -18,6 +21,7 @@ class EventStates(StatesGroup):
     max_participants = State()
     date = State()
     time = State()
+    poster = State()
 
 # --- Кнопка отмены ---
 cancel_button = InlineKeyboardMarkup(inline_keyboard=[
@@ -34,7 +38,7 @@ def get_last_event():
     return row  # None, если нет предыдущих ивентов
 
 # --- Сохраняем новый ивент ---
-def save_event(data: dict):
+def save_event(data: dict) -> int:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
@@ -49,8 +53,24 @@ def save_event(data: dict):
         data['date'],
         data['time']
     ))
+    event_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    return event_id
+
+
+def is_skip_poster(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return all(symbol in DASH_SYMBOLS for symbol in stripped)
+
+
+async def save_event_poster(message: Message, event_id: int) -> None:
+    PICS_DIR.mkdir(parents=True, exist_ok=True)
+    poster_path = PICS_DIR / f"{event_id}.png"
+    photo = message.photo[-1]
+    await message.bot.download(photo, destination=poster_path)
 
 # --- Старт создания ивента ---
 async def start_new_event(message: Message, state: FSMContext):
@@ -185,9 +205,34 @@ async def event_time(message: Message, state: FSMContext):
             await message.answer("⚠️ Неверный формат времени. Используйте HH:MM:", reply_markup=cancel_button)
             return
     await state.update_data(time=time_str)
-
     data = await state.get_data()
-    save_event(data)
+    event_id = save_event(data)
+    await state.update_data(event_id=event_id)
+    await message.answer(
+        "🖼️ Отправьте афишу для ивента или пропустите шаг.\n"
+        "Если афиша не нужна — отправьте «-» (подойдут разные тире).",
+        reply_markup=cancel_button,
+    )
+    await state.set_state(EventStates.poster)
+
+
+@router.message(EventStates.poster)
+async def event_poster(message: Message, state: FSMContext):
+    data = await state.get_data()
+    event_id = data["event_id"]
+    poster_path = PICS_DIR / f"{event_id}.png"
+
+    if message.photo:
+        await save_event_poster(message, event_id)
+    elif message.text and is_skip_poster(message.text):
+        if poster_path.exists():
+            poster_path.unlink()
+    else:
+        await message.answer(
+            "⚠️ Отправьте картинку или «-», если хотите пропустить.",
+            reply_markup=cancel_button,
+        )
+        return
 
     await message.answer(
         f"✅ Ивент создан!\n\n"
@@ -256,17 +301,12 @@ async def fill_time(call, state: FSMContext):
     last = get_last_event()
     if last:
         await state.update_data(time=last[3])
-        # После этого сохраняем событие
         data = await state.get_data()
-        save_event(data)
+        event_id = save_event(data)
+        await state.update_data(event_id=event_id)
         await call.message.edit_text(
-            f"✅ Ивент создан!\n\n"
-            f"🎬 Название: {data['name']}\n"
-            f"📝 Описание: {data['description']}\n"
-            f"💰 Цена: {data['price']}\n"
-            f"🏠 Адрес: {data['address']}\n"
-            f"👥 Макс. участников: {data['max_participants']}\n"
-            f"📅 Дата: {data['date']}\n"
-            f"⏰ Время: {data['time']}"
+            "🖼️ Отправьте афишу для ивента или пропустите шаг.\n"
+            "Если афиша не нужна — отправьте «-» (подойдут разные тире).",
+            reply_markup=cancel_button,
         )
-        await state.clear()
+        await state.set_state(EventStates.poster)
